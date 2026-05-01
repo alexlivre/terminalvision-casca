@@ -1,4 +1,4 @@
-"""HTTP client for CASCA terminal service."""
+"""HTTP client for CASCA terminal (Go daemon)."""
 
 import httpx
 from typing import Optional, List, Dict, Any
@@ -16,11 +16,14 @@ class CascaClient:
             self._client = httpx.Client(timeout=30.0)
         return self._client
 
-    def spawn(self, command: str, cols: int = 120, rows: int = 40, cwd: Optional[str] = None) -> Dict[str, Any]:
+    def spawn(self, command: str = "cmd.exe", cols: int = 120, rows: int = 40, cwd: str | None = None) -> Dict[str, Any]:
         """Spawn a new terminal session."""
+        payload = {"command": command, "cols": cols, "rows": rows}
+        if cwd:
+            payload["cwd"] = cwd
         response = self._get_client().post(
             f"{self.base_url}/terminal/spawn",
-            json={"command": command, "cols": cols, "rows": rows, "cwd": cwd}
+            json=payload
         )
         response.raise_for_status()
         return response.json()
@@ -34,7 +37,7 @@ class CascaClient:
     def send_keys(self, session_id: str, keys: str) -> bool:
         """Send keys to a terminal session."""
         response = self._get_client().post(
-            f"{self.base_url}/terminal/{session_id}/send",
+            f"{self.base_url}/terminal/{session_id}/keys",
             json={"keys": keys}
         )
         response.raise_for_status()
@@ -63,6 +66,15 @@ class CascaClient:
         response = self._get_client().delete(f"{self.base_url}/terminal/{session_id}")
         response.raise_for_status()
         return response.json().get("success", False)
+
+    def wait(self, session_id: str, condition: str, timeout_ms: int = 10000) -> Dict[str, Any]:
+        """Wait for a condition on a terminal session."""
+        response = self._get_client().get(
+            f"{self.base_url}/terminal/{session_id}/wait",
+            params={"condition": condition, "timeout_ms": timeout_ms}
+        )
+        response.raise_for_status()
+        return response.json()
 
     def close(self):
         """Close the HTTP client."""

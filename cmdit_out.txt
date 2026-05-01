@@ -1,0 +1,14 @@
+[?25l[?1049h[2J[H[?25l[?2004h[H --version ×                                  
+  cmdit v0.2.0                                
+                                              
+Editor de texto para humanos                  
+                                              
+Arquivos recentes:                            
+  1. untitled.txtteste-mcp.txt                
+  2. novo.txt                                 
+                                              
+Ctrl+O  Abrir arquivo                         
+Ctrl+P  Paleta de comandos                    
+Ctrl+Q  Sair                                  
+                                              
+Comece a digitar para criar um novo arquivo...[14;H
