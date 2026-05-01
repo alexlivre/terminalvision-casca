@@ -6,17 +6,15 @@ import (
 	"errors"
 	"time"
 
-	"localcasca/internal/domain"
-	"localcasca/internal/infrastructure"
+	"github.com/alexlivre/terminalvision-casca/internal/domain"
+	"github.com/alexlivre/terminalvision-casca/internal/infrastructure"
 )
 
-// SessionManager manages all terminal sessions
 type SessionManager struct {
 	ptySessions map[string]*domain.Session
 	ptyManager  *infrastructure.PTYManager
 }
 
-// NewSessionManager creates a new session manager
 func NewSessionManager() *SessionManager {
 	return &SessionManager{
 		ptySessions: make(map[string]*domain.Session),
@@ -24,14 +22,12 @@ func NewSessionManager() *SessionManager {
 	}
 }
 
-// generateID generates a unique session ID
 func generateID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return "sess_" + hex.EncodeToString(b)
 }
 
-// Spawn creates a new terminal session
 func (m *SessionManager) Spawn(req domain.SpawnRequest) (*domain.SpawnResponse, error) {
 	if req.Command == "" {
 		req.Command = "cmd.exe"
@@ -44,7 +40,6 @@ func (m *SessionManager) Spawn(req domain.SpawnRequest) (*domain.SpawnResponse, 
 	}
 
 	sessionID := generateID()
-
 	ptySession, err := m.ptyManager.Spawn(sessionID, req.Command, req.Args, req.Cols, req.Rows)
 	if err != nil {
 		return &domain.SpawnResponse{Success: false, Error: err.Error()}, err
@@ -62,7 +57,6 @@ func (m *SessionManager) Spawn(req domain.SpawnRequest) (*domain.SpawnResponse, 
 	}, nil
 }
 
-// GetScreen captures the current screen
 func (m *SessionManager) GetScreen(sessionID string, format string) (*domain.ScreenResponse, error) {
 	session, ok := m.ptySessions[sessionID]
 	if !ok {
@@ -89,7 +83,6 @@ func (m *SessionManager) GetScreen(sessionID string, format string) (*domain.Scr
 	return &domain.ScreenResponse{Type: "text", Content: content}, nil
 }
 
-// SendKeys sends keys to a session
 func (m *SessionManager) SendKeys(sessionID string, req domain.KeysRequest) (*domain.KeysResponse, error) {
 	ptySession, ok := m.ptyManager.Get(sessionID)
 	if !ok {
@@ -106,7 +99,6 @@ func (m *SessionManager) SendKeys(sessionID string, req domain.KeysRequest) (*do
 	return &domain.KeysResponse{Success: true}, nil
 }
 
-// Resize resizes a session
 func (m *SessionManager) Resize(sessionID string, cols, rows int) (*domain.ResizeResponse, error) {
 	ptySession, ok := m.ptyManager.Get(sessionID)
 	if !ok {
@@ -123,7 +115,6 @@ func (m *SessionManager) Resize(sessionID string, cols, rows int) (*domain.Resiz
 	return &domain.ResizeResponse{Success: true}, nil
 }
 
-// Wait waits for a condition
 func (m *SessionManager) Wait(sessionID string, req domain.WaitRequest) (*domain.WaitResponse, error) {
 	ptySession, ok := m.ptyManager.Get(sessionID)
 	if !ok {
@@ -153,7 +144,6 @@ func (m *SessionManager) Wait(sessionID string, req domain.WaitRequest) (*domain
 	return &domain.WaitResponse{Met: false, WaitedMs: int(time.Since(start).Milliseconds())}, nil
 }
 
-// List returns all sessions
 func (m *SessionManager) List() *domain.ListResponse {
 	sessions := make([]map[string]interface{}, 0)
 	for id, session := range m.ptySessions {
@@ -176,7 +166,6 @@ func (m *SessionManager) List() *domain.ListResponse {
 	return &domain.ListResponse{Sessions: sessions}
 }
 
-// Kill terminates a session
 func (m *SessionManager) Kill(sessionID string) (*domain.KillResponse, error) {
 	if _, ok := m.ptySessions[sessionID]; !ok {
 		return &domain.KillResponse{Success: false, Error: "session not found"}, errors.New("session not found")

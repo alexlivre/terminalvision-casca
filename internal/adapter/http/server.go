@@ -7,17 +7,15 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"localcasca/internal/domain"
-	"localcasca/internal/usecase"
+	"github.com/alexlivre/terminalvision-casca/internal/domain"
+	"github.com/alexlivre/terminalvision-casca/internal/usecase"
 )
 
-// Server handles HTTP requests
 type Server struct {
 	router  *mux.Router
 	manager *usecase.SessionManager
 }
 
-// NewServer creates a new HTTP server
 func NewServer() *Server {
 	return &Server{
 		router:  mux.NewRouter(),
@@ -25,7 +23,6 @@ func NewServer() *Server {
 	}
 }
 
-// SetupRoutes configures all routes
 func (s *Server) SetupRoutes() {
 	s.router.HandleFunc("/terminal/spawn", s.handleSpawn).Methods("POST")
 	s.router.HandleFunc("/terminal/list", s.handleList).Methods("GET")
@@ -39,7 +36,6 @@ func (s *Server) SetupRoutes() {
 	s.router.HandleFunc("/metrics", s.handleMetrics).Methods("GET")
 }
 
-// Router returns the configured router
 func (s *Server) Router() *mux.Router {
 	return s.router
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"localcasca/internal/domain"
+	"github.com/alexlivre/terminalvision-casca/internal/domain"
 )
 
 // PTYSession represents a PTY-based terminal session
