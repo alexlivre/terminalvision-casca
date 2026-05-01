@@ -71,8 +71,32 @@ func parseStringKeys(s string) []byte {
 		return bytes
 	}
 
-	// Return as-is (literal text)
-	return []byte(s)
+	// Handle escape sequences
+	result := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'r':
+				result = append(result, '\r')
+				i++
+			case 'n':
+				result = append(result, '\n')
+				i++
+			case 't':
+				result = append(result, '\t')
+				i++
+			case '\\':
+				result = append(result, '\\')
+				i++
+			default:
+				result = append(result, s[i])
+			}
+		} else {
+			result = append(result, s[i])
+		}
+	}
+
+	return result
 }
 
 func parseKeyEvent(item interface{}) ([]byte, error) {
