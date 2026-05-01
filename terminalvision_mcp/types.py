@@ -4,7 +4,7 @@ from enum import Enum
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ScreenCaptureType(str, Enum):
@@ -22,8 +22,7 @@ class ScreenCapture(BaseModel):
     hash: Optional[str] = Field(default=None, description="Hash of the captured screen")
     path: Optional[str] = Field(default=None, description="Path to image for image capture")
 
-    class Config:
-        frozen = True
+    model_config = ConfigDict(frozen=True)
 
 
 class SessionInfo(BaseModel):

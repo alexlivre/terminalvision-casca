@@ -18,7 +18,7 @@ class TextCapture:
 
     def __init__(self, cols: int = 120, rows: int = 40):
         """Initialize text capture.
-        
+
         Args:
             cols: Number of columns
             rows: Number of rows
@@ -29,7 +29,7 @@ class TextCapture:
 
     def update(self, data: str) -> None:
         """Update with terminal data.
-        
+
         Args:
             data: Terminal output data
         """
@@ -37,20 +37,21 @@ class TextCapture:
 
     def get_text(self) -> str:
         """Get current screen text.
-        
+
         Returns:
             Screen text as string
         """
         lines = []
         for row in self.screen.display:
-            line = "".join(char[0] for char in row if char[0] not in (" ", "▒"))
+            # Only filter block chars, keep spaces
+            line = "".join(char[0] for char in row if char[0] != "\u2592")
             if line.rstrip():
                 lines.append(line.rstrip())
         return "\n".join(lines)
 
     def get_hash(self) -> str:
         """Get hash of current screen.
-        
+
         Returns:
             MD5 hash of screen content
         """
@@ -64,14 +65,14 @@ class ImageCapture:
 
     def __init__(self):
         """Initialize image capture."""
-        self.sct = mss.mss()
+        self.sct = mss.MSS()
 
     def capture(self, output_path: Optional[str] = None) -> str:
         """Capture full screen.
-        
+
         Args:
             output_path: Optional path to save screenshot
-            
+
         Returns:
             Path to saved screenshot
         """
@@ -87,7 +88,7 @@ class CaptureEngine:
 
     def __init__(self, cols: int = 120, rows: int = 40):
         """Initialize capture engine.
-        
+
         Args:
             cols: Number of columns
             rows: Number of rows
@@ -99,7 +100,7 @@ class CaptureEngine:
 
     def update_from_pty(self, handler) -> None:
         """Update text capture from PTY handler.
-        
+
         Args:
             handler: PTY handler with read() method
         """
@@ -112,7 +113,7 @@ class CaptureEngine:
 
     def capture_text(self) -> ScreenCapture:
         """Capture text screen.
-        
+
         Returns:
             ScreenCapture with text content
         """
@@ -124,7 +125,7 @@ class CaptureEngine:
 
     def capture_image(self) -> ScreenCapture:
         """Capture image screen.
-        
+
         Returns:
             ScreenCapture with image path
         """
@@ -134,7 +135,7 @@ class CaptureEngine:
                 type=ScreenCaptureType.IMAGE,
                 path=path,
             )
-        except Exception as e:
+        except Exception:
             return ScreenCapture(
                 type=ScreenCaptureType.IMAGE,
                 path=None,
