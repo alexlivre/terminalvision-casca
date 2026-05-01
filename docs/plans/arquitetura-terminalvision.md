@@ -1,112 +1,210 @@
-# TerminalVision: Arquitetura MCP + CASCA v2
+# TerminalVision: Arquitetura MCP + CASCA v3
 
-> **Meta:** MCP Server que controla programas de terminal interativos (TUIs) como cmdit, vim, nano.
->
-> **Problema Original:** subprocess.Popen cria pipes, não TTYs. TUIs detectam ausência de TTY e falham.
->
-> **Solução:** CASCA é uma "casca" que cria terminais REAIS e permite captura de tela + envio de teclas.
+> **Versão:** 3.0 (Final após research)
+> **Data:** 2026-05-01
+> **Status:** Para implementação
 
 ---
 
-## Conceito
+## Resumo Executivo
+
+**Meta:** MCP Server que controla programas de terminal interativos (TUIs) como cmdit, vim, nano.
+
+**Problema:** subprocess.Popen cria pipes, não TTYs. TUIs detectam ausência de TTY e falham.
+
+**Solução:** CASCA (Go) é um daemon que gerencia terminais REAIS (ConPTY/Visible) e expõe API HTTP. MCP (Python) conecta ao CASCA e expõe tools para o agente.
+
+---
+
+## Conceito Visual
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                      TerminalVision                              │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   ┌─────────┐        ┌─────────┐        ┌──────────────────┐   │
-│   │   MCP   │◄──────►│  CASCA  │◄──────►│   Terminal(ões)   │   │
-│   │(Python) │  HTTP  │  (Go)   │        │ cmd.exe, cmdit... │   │
-│   │         │        │         │        │                  │   │
-│   │ Tools:  │        │Modes:   │        │ 2 modos:         │   │
-│   │ -spawn  │        │ -ConPTY │        │  -ConPTY (headless)│   │
-│   │ -screen │        │ -Visible│        │  -Visible (window) │   │
-│   │ -keys   │        │         │        │                  │   │
-│   │ -resize │        │Screenshot│        │Screenshot:        │   │
-│   │ -kill   │        │ -VT100  │        │ -VT100 (text)     │   │
-│   │ -wait   │        │ -Image  │        │ -Image (capture)  │   │
-│   └─────────┘        └─────────┘        └──────────────────┘   │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         TerminalVision                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│   ┌─────────┐        ┌──────────────────────────────────────────┐   │
+│   │   MCP   │◄──────►│                   CASCA                    │   │
+│   │(Python) │  HTTP  │                  (Go)                     │   │
+│   │         │        │                                             │   │
+│   │ Tools:  │        │  ┌─────────────────────────────────────┐   │   │
+│   │ -spawn  │        │  │         Infrastructure              │   │   │
+│   │ -screen │        │  │  ┌─────────────┐ ┌─────────────┐   │   │   │
+│   │ -keys   │        │  │  │  ConPTY     │ │  Visible    │   │   │   │
+│   │ -resize │        │  │  │  (headless) │ │  (window)   │   │   │   │
+│   │ -wait   │        │  │  └─────────────┘ └─────────────┘   │   │   │
+│   │ -kill   │        │  │                                     │   │   │
+│   │ -list   │        │  │  ┌─────────────┐ ┌─────────────┐   │   │   │
+│   └─────────┘        │  │  │  Screenshot │ │  Key Send   │   │   │   │
+│                     │  │  │  (VT100/img) │ │  (PTY/WM)   │   │   │   │
+│                     │  │  └─────────────┘ └─────────────┘   │   │   │
+│                     │  └─────────────────────────────────────┘   │   │
+│                     └──────────────────────────────────────────┘   │
+│                                                                       │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Arquitetura Detalhada
+## Research: Bibliotecas Identificadas
 
-### Componentes
+### ConPTY para Go
+| Biblioteca | Uso | Status |
+|------------|-----|--------|
+| `github.com/qsocket/conpty-go` | ConPTY Windows nativo | **Usar** |
+| `github.com/creack/pty` | PTY cross-platform (Unix + ConPTY) | **Usar como fallback** |
 
-#### CASCA (Go) — Terminal Manager
-**Responsabilidade:** Criar terminais com TTY real, capturar tela, repassar teclas.
+### Screenshot
+| Biblioteca | Uso | Status |
+|------------|-----|--------|
+| `github.com/gen2brain/mss` | Screenshot cross-platform | Verificar |
+| `github.com/vova616/screenshot` | Alternativa mais leve | Backup |
+
+### HTTP Router
+| Biblioteca | Uso | Status |
+|------------|-----|--------|
+| `net/http` (stdlib) | HTTP server | **Usar** |
+| `github.com/gorilla/mux` | Router mais rico | Opcional |
+
+### Referências de Arquitetura
+| Projeto | Linguagem | Relevância |
+|--------|-----------|------------|
+| [agent-tui](https://github.com/pproenca/agent-tui) | Rust | Arquitetura idêntica (Unix-only) |
+| [wterm](https://github.com/luinbytes/wterm) | Go | Terminal emulator com Bubble Tea |
+| [conpty-go](https://github.com/qsocket/conpty-go) | Go | ConPTY implementation |
+
+---
+
+## Arquitetura: Clean Architecture
 
 ```
 casca/
-├── main.go                 # Entry point, HTTP server
-├── terminal.go             # Gerencia processos de terminal
-├── modes/
-│   ├── conpty.go           # ConPTY mode (headless)
-│   └── visible.go          # Visible window mode
-├── screen/
-│   ├── vt100.go            # Parser VT100 (texto)
-│   └── capture.go          # Screenshot (imagem)
-├── keys/
-│   └── send.go            # Envio de teclas
-└── api/
-    ├── router.go           # HTTP routes
-    └── handlers.go         # Request/response handlers
+├── cmd/
+│   └── casca/
+│       └── main.go              # Entry point, daemon startup
+├── internal/
+│   ├── domain/                 # Core entities (no dependencies)
+│   │   ├── session.go         # Session entity
+│   │   ├── screen.go         # Screen capture entity
+│   │   └── input.go          # Input entity
+│   │
+│   ├── usecase/              # Application logic
+│   │   ├── spawn.go          # Spawn terminal session
+│   │   ├── screenshot.go     # Capture screen (VT100 or image)
+│   │   ├── sendkeys.go       # Send keys to session
+│   │   ├── resize.go         # Resize terminal
+│   │   ├── wait.go           # Wait for conditions
+│   │   ├── kill.go           # Kill session
+│   │   └── list.go           # List sessions
+│   │
+│   ├── adapter/              # External interfaces
+│   │   ├── http/
+│   │   │   ├── router.go     # HTTP route setup
+│   │   │   └── handlers.go   # Request handlers
+│   │   └── pipe/             # Named pipe (Windows)
+│   │
+│   └── infrastructure/       # Low-level implementations
+│       ├── conpty/            # ConPTY implementation (qsocket/conpty-go)
+│       ├── visible/           # Visible window implementation
+│       ├── screen/           # Screenshot implementation
+│       └── keys/              # Key sending implementation
+│
+└── pkg/
+    └── vt100/                # VT100 parser
 ```
 
-**CASCA tem 2 modos operacionais:**
+**Dependency Rule:** `domain` → `usecase` → `adapter` → `infrastructure`
 
-| Modo | Quando usar | Screenshot | Velocidade | TTY |
-|------|-------------|------------|------------|-----|
-| **ConPTY** | Programas texto simples | Parser VT100 | Rápido | Sim |
-| **Visible** | TUIs complexos (cmdit, vim) | Captura real | Lento | Sim |
+---
 
-**Decisão de modo:**
-- CASCA tenta ConPTY primeiro
-- Se output em 2s não chegar, sugere Visible mode
-- Ou modo explícito via parâmetro `mode: "conpty"|"visible"|"auto"`
+## CASCA: 2 Modos de Operação
 
-#### MCP (Python) — MCP Server
-**Responsabilidade:** Servidor MCP + cliente HTTP para CASCA.
+### Modo 1: ConPTY (Headless)
+**Para:** cmd.exe, powershell, git, programas CLI simples
 
 ```
-mcp/
-├── main.py                 # Entry point MCP
-├── client/
-│   └── casca_client.py     # HTTP client para CASCA
-├── tools/
-│   ├── terminal_spawn.py
-│   ├── terminal_get_screen.py
-│   ├── terminal_send_keys.py
-│   ├── terminal_resize.py
-│   ├── terminal_wait_for_stable.py
-│   ├── terminal_list_sessions.py
-│   └── terminal_kill.py
-├── types/
-│   └── types.py            # Pydantic models
-├── pyproject.toml
-└── requirements.txt
+┌─────────────────────────────────────────────────┐
+│              ConPTY Mode                        │
+├─────────────────────────────────────────────────┤
+│                                                  │
+│  CASCA ──► ConPTY ──► cmd.exe                    │
+│                    │                             │
+│                    └── PTY (pseudo-terminal)    │
+│                                                  │
+│  Input:  CASCA write to PTY                     │
+│  Output: PTY → VT100 parse → texto              │
+│                                                  │
+│  ✅ Rápido, invisível                           │
+│  ⚠️  TUIs complexos podem não funcionar        │
+│                                                  │
+└─────────────────────────────────────────────────┘
+```
+
+### Modo 2: Visible (Window)
+**Para:** cmdit, vim, nano, htop, qualquer TUI que precise de janela real
+
+```
+┌─────────────────────────────────────────────────┐
+│              Visible Mode                       │
+├─────────────────────────────────────────────────┤
+│                                                  │
+│  CASCA ──► CreateProcess ──► cmd.exe /k cmdit   │
+│                    │                             │
+│                    └── Nova janela de terminal   │
+│                                                  │
+│  Screenshot: PrintWindow API                    │
+│  Keys:      PostMessage / AttachThreadInput    │
+│                                                  │
+│  ✅ Funciona com QUALQUER TUI                  │
+│  ⚠️  Mais lento, janela visível (pode minimizar) │
+│                                                  │
+└─────────────────────────────────────────────────┘
+```
+
+### Auto-Detect Logic
+```go
+func SpawnWithFallback(command string, args []string, cols, rows int) (*Session, string, error) {
+    // 1. Tenta ConPTY
+    session, err := SpawnConPTY(command, args, cols, rows)
+    if err != nil {
+        return nil, "", err
+    }
+
+    // 2. Verifica se há output em 2 segundos
+    if HasOutput(session, 2*time.Second) {
+        return session, "conpty", nil
+    }
+
+    // 3. ConPTY não funcionou, mata e usa Visible
+    session.Kill()
+
+    // 4. Visible mode
+    session, err = SpawnVisible(command, args)
+    if err != nil {
+        return nil, "", err
+    }
+    return session, "visible", nil
+}
 ```
 
 ---
 
-## API CASCA v2
+## API HTTP CASCA v3
 
 ### Endpoints
 
-```
-POST   /terminal/spawn          # Criar nova sessão
-GET    /terminal/list          # Listar sessões
-GET    /terminal/{id}/screen   # Capturar tela
-POST   /terminal/{id}/keys     # Enviar teclas
-POST   /terminal/{id}/resize   # Redimensionar
-GET    /terminal/{id}/wait     # Espera tela estabilizar
-DELETE /terminal/{id}          # Encerrar sessão
-GET    /health                 # Health check
-```
+| Method | Path | Descrição |
+|--------|------|-----------|
+| POST | `/terminal/spawn` | Criar sessão |
+| GET | `/terminal/list` | Listar sessões |
+| GET | `/terminal/{id}` | Info da sessão |
+| GET | `/terminal/{id}/screen` | Captura tela |
+| POST | `/terminal/{id}/keys` | Enviar teclas |
+| POST | `/terminal/{id}/resize` | Redimensionar |
+| GET | `/terminal/{id}/wait` | Esperar condição |
+| DELETE | `/terminal/{id}` | Encerrar |
+| GET | `/health` | Health check |
+| GET | `/metrics` | Métricas |
 
 ### Request/Response Examples
 
@@ -115,7 +213,7 @@ GET    /health                 # Health check
 Request: {
   "command": "cmdit.exe",
   "args": ["file.md"],
-  "mode": "auto",        // "conpty", "visible", "auto"
+  "mode": "auto",
   "cols": 120,
   "rows": 40,
   "cwd": "C:\\projects"
@@ -123,15 +221,16 @@ Request: {
 Response: {
   "success": true,
   "session_id": "sess_abc123",
-  "mode_used": "conpty",  // ou "visible"
+  "mode_used": "conpty",
   "pid": 12345
 }
 
 // POST /terminal/{id}/keys
 Request: {
-  "keys": "hello world\n"                    // literal
-  // ou
-  "keys": [{"type": "ctrl"}, {"type": "key", "key": "s"}]  // estruturado
+  "keys": "hello world\n",
+  // ou estruturado:
+  "keys": [{"type": "ctrl+c"}],
+  "keys": [{"type": "alt"}, {"type": "f4"}]
 }
 Response: { "success": true }
 
@@ -150,11 +249,28 @@ Response: {
   "height": 1080
 }
 
-// GET /terminal/{id}/wait?timeout_ms=5000
+// GET /terminal/{id}/wait?condition=text:Loading&timeout_ms=5000
+// ou ?condition=stable:3s&timeout_ms=10000
 Response: {
-  "stable": true,
-  "hash": "sha256:abc123...",
+  "met": true,
   "waited_ms": 1200
+}
+
+// GET /terminal/list
+Response: {
+  "sessions": [
+    {
+      "id": "sess_abc123",
+      "command": "cmdit.exe",
+      "pid": 12345,
+      "status": "running",
+      "mode": "conpty",
+      "cols": 120,
+      "rows": 40,
+      "created_at": "2026-05-01T10:00:00Z",
+      "last_activity": "2026-05-01T10:00:05Z"
+    }
+  ]
 }
 
 // DELETE /terminal/{id}
@@ -166,98 +282,152 @@ Response: { "success": true }
 ## Fluxo de Interação
 
 ```
-1. AIAgent → MCP terminal_spawn(command="cmdit")
-                 ↓
-2. MCP → HTTP POST /terminal/spawn
-                 ↓
+1. AIAgent ──► MCP terminal_spawn(command="cmdit")
+                  │
+                  ▼
+2. MCP ──► HTTP POST /terminal/spawn
+                  │
+                  ▼
 3. CASCA:
    - Tenta ConPTY primeiro
    - Se output em 2s, usa ConPTY
    - Se não, abre Visible window
-                 ↓
+                  │
+                  ▼
 4. CASCA retorna: session_id="abc", mode_used="conpty"
-                 ↓
-5. MCP → AIAgent: session_id="abc"
+                  │
+                  ▼
+5. MCP ──► AIAgent: session_id="abc"
 
 --- Get Screen ---
-6. AIAgent → MCP terminal_get_screen(session_id="abc", format="text")
-                 ↓
-7. MCP → HTTP GET /terminal/abc/screen?format=text
-                 ↓
-8. CASCA retorna conteúdo da tela
-                 ↓
-9. MCP → AIAgent: texto da tela
+6. AIAgent ──► MCP terminal_get_screen(session_id="abc", format="text")
+                  │
+                  ▼
+7. MCP ──► HTTP GET /terminal/abc/screen?format=text
+                  │
+                  ▼
+8. CASCA:
+   - ConPTY: Ler buffer, parse VT100, retornar texto
+   - Visible: PrintWindow, salvar PNG, retornar path
+                  │
+                  ▼
+9. MCP ──► AIAgent: texto ou path da imagem
 
 --- Send Keys ---
-10. AIAgent → MCP terminal_send_keys(session_id="abc", keys="Ctrl+S")
-                 ↓
-11. MCP → HTTP POST /terminal/abc/keys
-                 ↓
-12. CASCA repassa para stdin do processo
+10. AIAgent ──► MCP terminal_send_keys(session_id="abc", keys="Ctrl+S")
+                  │
+                  ▼
+11. MCP ──► HTTP POST /terminal/abc/keys
+                  │
+                  ▼
+12. CASCA:
+    - ConPTY: write to PTY
+    - Visible: PostMessage
+                  │
+                  ▼
+13. MCP ──► AIAgent: success
+
+--- Wait ---
+14. AIAgent ──► MCP terminal_wait_for_stable(session_id="abc", timeout_ms=5000)
+                  │
+                  ▼
+15. MCP ──► HTTP GET /terminal/abc/wait?condition=stable:2s&timeout_ms=5000
+                  │
+                  ▼
+16. CASCA: Loop polling screen hash até estável ou timeout
+                  │
+                  ▼
+17. MCP ──► AIAgent: {stable: true, waited_ms: 1500}
 
 --- Kill ---
-13. AIAgent → MCP terminal_kill(session_id="abc")
-                 ↓
-14. MCP → HTTP DELETE /terminal/abc
-                 ↓
-15. CASCA mata processo, limpa sessão
+18. AIAgent ──► MCP terminal_kill(session_id="abc")
+                  │
+                  ▼
+19. MCP ──► HTTP DELETE /terminal/abc
+                  │
+                  ▼
+20. CASCA: Terminate process, cleanup session
 ```
 
 ---
 
-## Decisões Técnicas
+## Key Sending: Hybrid Approach
 
-### Por que Go para CASCA?
-
-| Razão | Explicação |
-|-------|------------|
-| **go-pty** | Bindings ConPTY maduros e testados |
-| **Binário único** | Não precisa runtime Python |
-| **Cross-compile** | Windows, Linux, Mac de uma compilação |
-| **Goroutines** | Múltiplas sessões em paralelo |
-| **Screenshot libs** | Bindings para captura nativa disponíveis |
-
-### Por que 2 modos (ConPTY + Visible)?
-
-**ConPTY (headless):**
-- Para: cmd.exe, powershell, programas CLI
-- Vantagem: Rápido, invisível
-- Desvantagem: TUIs complexos podem não funcionar
-
-**Visible (window):**
-- Para: cmdit, vim, nano, htop, qualquer TUI
-- Vantagem: Funciona com qualquer programa
-- Desvantagem: Mais lento, janela visível
-
-**Fallback automático:**
+### ConPTY Mode
 ```go
-func spawnWithFallback(command string) (*Session, string) {
-    // Tenta ConPTY primeiro
-    session, err := spawnConPTY(command)
-    if err == nil {
-        // Verifica se há output em 2 segundos
-        if hasOutput(session, 2*time.Second) {
-            return session, "conpty"
-        }
-        // ConPTY não funcionou, mata e usa Visible
-        session.Kill()
+func (s *ConPTYSession) SendKeys(keys string) error {
+    // Parsing simples
+    for _, r := range keys {
+        s.pty.Write([]byte{r})
     }
-    // Visible mode
-    return spawnVisible(command), "visible"
+    return nil
 }
 ```
 
-### Por que screenshot é central?
+### Visible Mode
+```go
+func (s *VisibleSession) SendKeys(keys string) error {
+    // PostMessage para janela
+    for _, r := range keys {
+        user32.PostMessage(s.hwnd, user32.WM_CHAR, wparam(r), 0)
+    }
+    return nil
+}
+```
 
-**TUIs complexos (cmdit, vim):**
-- Usam renderização customizada (Bubble Tea, ncurses)
-- Parser VT100 não funciona
-- Screenshot real é a única opção
+### Key Mapping Table
+| Input | Output (bytes) |
+|-------|----------------|
+| `ctrl+c` | `0x03` (ETX) |
+| `ctrl+d` | `0x04` (EOT) |
+| `ctrl+z` | `0x1A` (SUB) |
+| `enter` | `\r\n` (CRLF) |
+| `escape` | `0x1B` (ESC) |
+| `tab` | `\t` (TAB) |
+| `arrow_up` | `\x1B[A` (VT100) |
+| `arrow_down` | `\x1B[B` |
 
-**TUIs simples:**
-- Parser VT100 é mais leve
-- Retorna texto editável
-- Screenshot como fallback
+---
+
+## Wait Conditions
+
+### Tipos de Condição
+1. **text:** Aguarda texto específico aparecer
+2. **stable:** Aguarda tela estabilizar por X segundos
+
+### Implementação
+```go
+func (s *Session) Wait(condition string, timeoutMs int) (bool, int, error) {
+    start := time.Now()
+    lastHash := ""
+
+    for time.Since(start) < timeoutMs {
+        screen := s.ReadOutput()
+        hash := sha256(screen)
+
+        if strings.HasPrefix(condition, "text:") {
+            text := strings.TrimPrefix(condition, "text:")
+            if strings.Contains(screen, text) {
+                return true, int(time.Since(start).Milliseconds()), nil
+            }
+        } else if strings.HasPrefix(condition, "stable:") {
+            duration, _ := time.ParseDuration(strings.TrimPrefix(condition, "stable:"))
+            if hash == lastHash && lastHash != "" {
+                if time.Since(stableSince) >= duration {
+                    return true, int(time.Since(start).Milliseconds()), nil
+                }
+            } else {
+                stableSince = time.Now()
+            }
+            lastHash = hash
+        }
+
+        time.Sleep(100 * time.Millisecond)
+    }
+
+    return false, int(time.Since(start).Milliseconds()), nil
+}
+```
 
 ---
 
@@ -265,72 +435,132 @@ func spawnWithFallback(command string) (*Session, string) {
 
 | Componente | Linguagem | Biblioteca | Motivo |
 |-----------|-----------|------------|--------|
+| CASCA Server | Go 1.21+ |stdlib `net/http` | HTTP server |
+| ConPTY | Go | `github.com/qsocket/conpty-go` | ConPTY Windows |
+| PTY | Go | `github.com/creack/pty` | Fallback PTY |
+| Screenshot | Go | `github.com/gen2brain/mss` | Captura imagem |
+| VT100 Parser | Go | custom (`pkg/vt100/`) | Parse texto |
 | MCP Server | Python 3.11+ | `mcp` SDK | Padrão MCP |
-| CASCA | Go 1.21+ | go-pty, net/http | Binário único, ConPTY |
-| Terminal (headless) | Sistema | ConPTY | TTY real no Windows |
-| Terminal (visible) | Sistema | Windows API | Janela real |
-| Screenshot texto | Go | vt100 parser | Leve |
-| Screenshot imagem | Go | github.com/gen2brain/msh | Cross-platform |
+| MCP Client | Python | `httpx` | HTTP client |
 
 ---
 
 ## Roadmap de Implementação
 
-### Fase 1: CASCA Minimal (Go)
-- [x] Estrutura de pastas
-- [ ] HTTP server com gorilla/mux
-- [ ] Spawn subprocess básico
-- [ ] Captura stdout
-- [ ] CRUD de sessões
+### Fase 1: CASCA Core (Go) — Sprint 1
+**Meta:** Spawn e screen básicos funcionam
 
-### Fase 2: CASCA + ConPTY (Go)
-- [ ] go-pty para ConPTY
-- [ ] Parser VT100
-- [ ] Resize
-- [ ] Session state
+- [ ] `go mod init github.com/terminalvision/casca`
+- [ ] Estrutura Clean Architecture
+- [ ] Domain entities (Session, Screen, Input)
+- [ ] HTTP server com net/http
+- [ ] Session manager (in-memory map)
+- [ ] Spawn com conpty-go
+- [ ] VT100 parser (pkg/vt100)
+- [ ] Screen capture (VT100 text)
+- [ ] API endpoints (spawn, screen, kill, list)
+- [ ] Teste: spawn cmd.exe, screen, kill
 
-### Fase 3: CASCA + Visible Mode (Go)
-- [ ] Criar janela visível
-- [ ] Screenshot da janela
-- [ ] Enviar teclas (PostMessage)
-- [ ] Focus management
+### Fase 2: CASCA Input + Resize — Sprint 2
+**Meta:** Enviar teclas e redimensionar funciona
 
-### Fase 4: MCP Server (Python)
-- [ ] Cliente HTTP para CASCA
-- [ ] Tools MCP básicas
-- [ ] wait_for_stable helper
-- [ ] list_vision_mcps discovery
+- [ ] Key parser (string → bytes)
+- [ ] PTY write (ConPTY mode)
+- [ ] Resize support
+- [ ] Teste: echo hello, pipe input
 
-### Fase 5: Integração e Testes
-- [ ] Testar com cmd.exe
-- [ ] Testar com cmdit
-- [ ] Testar com vim/nano
+### Fase 3: CASCA Wait Conditions — Sprint 3
+**Meta:** Wait for text/stability funciona
+
+- [ ] Wait for text
+- [ ] Wait for stability (hash-based)
+- [ ] Timeout handling
+- [ ] Teste: vim, nano
+
+### Fase 4: CASCA Visible Mode — Sprint 4
+**Meta:** TUIs complexos (cmdit) funcionam
+
+- [ ] FindWindow by PID
+- [ ] PrintWindow screenshot
+- [ ] PostMessage key sending
+- [ ] Auto-detect mode (ConPTY fails → Visible)
+- [ ] Teste: cmdit
+
+### Fase 5: MCP Server — Sprint 5
+**Meta:** MCP server conecta ao CASCA
+
+- [ ] HTTP client em Python (httpx)
+- [ ] MCP tools (spawn, screen, keys, resize, wait, kill, list)
 - [ ] Error handling
+- [ ] Timeout handling
+
+### Fase 6: Integration — Sprint 6
+**Meta:** Tudo funciona junto end-to-end
+
+- [ ] Configuração (env vars, config file)
 - [ ] Logging
+- [ ] Error recovery
+- [ ] Testes end-to-end com cmdit
+- [ ] Documentação
 
 ---
 
 ## Riscos e Mitigações
 
-| Risco | Probabilidade | Mitigação |
-|-------|--------------|-----------|
-| ConPTY API complexa no Windows | Média | go-pty abstrai, Visible como fallback |
-| Visible mode precisa de janela | Baixa | Janela pode ser minimizada |
-| Screenshot é muito lento | Alta | Diffonly + cache + compressão |
-| Memory leak em long-running | Média | Session timeout + cleanup automático |
-| cmdit não funciona em ConPTY | Alta | Visible mode obrigatório para cmdit |
-| CASCA crash mata todas sessões | Baixa | Persistência de estado em arquivo |
+| Risco | Prob | Impacto | Mitigação |
+|-------|------|---------|-----------|
+| conpty-go não funciona no Windows 11 | Baixa | Alto | creack/pty como fallback, Visible mode |
+| Visible mode complexo (FindWindow, PostMessage) | Média | Alto | Começar com ConPTY, Visible só para cmdit |
+| Screenshot é muito lento | Alta | Médio | Cache + diffonly + compressão |
+| cmdit não funciona em nenhum modo | Alta | Alto | Testar cedo, buscar alternativas |
+| Memory leak em long-running sessions | Média | Médio | Session timeout (30min idle) + cleanup |
+| Go ConPTY bindings immaturos | Baixa | Alto | Testes extensivos, fallback Visible |
+
+---
+
+## IPC: HTTP + Named Pipe
+
+### HTTP (Default)
+```bash
+# Desenvolvimento e debugging
+casca --port 8787
+curl http://localhost:8787/terminal/spawn -d '{"command": "cmd.exe"}'
+```
+
+### Named Pipe (Windows Production)
+```go
+// Windows: \\.\pipe\terminalvision
+listener, _ := win.NewPipeListener("\\\\.\\pipe\\terminalvision")
+conn, _ := listener.Accept()
+// JSON-RPC over pipe
+```
+
+### Decision:
+- **HTTP** para desenvolvimento/debugging
+- **Named Pipe** como opção para produção Windows
+- Não implementar Unix Socket (Windows-only por enquanto)
 
 ---
 
 ## Configuração
 
+### Environment Variables
+```bash
+CASCA_PORT=8787                  # HTTP port (default: 8787)
+CASCA_PIPE=\\.\pipe\terminalvision  # Named pipe path
+CASCA_DEFAULT_SHELL=cmd.exe       # Shell padrão
+CASCA_DEFAULT_COLS=120           # Colunas padrão
+CASCA_DEFAULT_ROWS=40            # Linhas padrão
+CASCA_SESSION_TIMEOUT=3600       # Timeout em segundos (default: 1h)
+CASCA_LOG_LEVEL=info             # debug|info|warn|error
+```
+
+### Config File (YAML)
 ```yaml
 # casca.yaml
 server:
-  host: "localhost"
   port: 8787
-  pipe: "\\\\.\\pipe\\terminalvision"  # Named pipe (futuro)
+  pipe: "\\.\pipe\terminalvision"
 
 terminal:
   default_shell: "cmd.exe"
@@ -341,74 +571,57 @@ modes:
   conpty:
     timeout_ms: 2000  # Timeout para detectar se ConPTY funciona
   visible:
-    start_minimized: true  # Visible mas não打扰
-    screenshot_interval_ms: 100
+    start_minimized: true
 
 session:
-  max_idle_seconds: 3600  # Cleanup de sessões órfãs
-  persist_to_file: false
+  max_idle_seconds: 3600
+  cleanup_interval_seconds: 60
 ```
 
 ---
 
-## Testes
+## Diff: v1 → v2 → v3
 
-### CASCA tests (Go)
-```bash
-go test ./... -v
-```
-
-### MCP tests (Python)
-```bash
-pytest tests/ -v
-```
-
-### Integration tests
-```bash
-# 1. Build CASCA
-cd casca && go build -o casca.exe .
-
-# 2. Start CASCA
-./casca.exe --port 8787
-
-# 3. Test spawn
-curl -X POST http://localhost:8787/terminal/spawn \
-  -H "Content-Type: application/json" \
-  -d '{"command": "cmd.exe /c echo hello"}'
-
-# 4. Test screen
-curl http://localhost:8787/terminal/sess_abc/screen
-
-# 5. Test kill
-curl -X DELETE http://localhost:8787/terminal/sess_abc
-```
+| Aspecto | v1 | v2 | v3 (Final) |
+|---------|----|----|------------|
+| Bibliotecas | Não especificadas | Mencionadas | **Identificadas: conpty-go, creack/pty, mss** |
+| Arquitetura | Linear | Layers | **Clean Architecture com domínios** |
+| Daemon | Não | Não | **Sim, long-running process** |
+| IPC | HTTP | HTTP | **HTTP + Named Pipe fallback** |
+| Modos | 1 | 2 | **2 + auto-detect** |
+| Key sending | Básico | Básico | **Hybrid (PTY write + PostMessage)** |
+| Wait conditions | Não | Básico | **Hash-based + pattern matching** |
+| Visible mode | Mencionado | Detalhado | **PrintWindow + PostMessage + FindWindow** |
+| Research | Não | Não | **Sim: agent-tui, wterm, conpty-go** |
 
 ---
 
-## Perguntas em Aberto
+## Conclusão
 
-1. **Visible mode é aceitável?** (janela visível do programa)
-2. **Qual o ambiente final?** (Windows only? Cross-platform?)
-3. **cmdit funciona em ConPTY?** (precisamos testar primeiro)
-4. **CASCA como serviço permanente ou start/stop?**
-5. **Persistência de sessões?** (memória vs arquivo vs SQLite)
+**Plano v3 inclui:**
+1. ✅ Clean Architecture com camadas
+2. ✅ Bibliotecas Go específicas identificadas
+3. ✅ Daemon architecture
+4. ✅ Wait conditions completas
+5. ✅ Visible mode com PrintWindow/PostMessage detalhado
+6. ✅ IPC com fallback Named Pipe
+7. ✅ Key mapping detalhado
+8. ✅ Auto-detect entre ConPTY e Visible
+9. ✅ Research com projetos reais
 
----
-
-## Diff: Original vs Novo Plano
-
-| Aspecto | Original | Novo |
-|---------|----------|------|
-| TTY handling | winpty (imperfeito) | ConPTY + Visible fallback |
-| Screenshot | Parser VT100 apenas | Parser VT100 + Image |
-| Modos | 1 | 2 (headless + visible) |
-| Error handling | Timeout only | Fallback automático |
-| CASCA | subprocess wrapper | Terminal manager completo |
-| cmdit | Não mencionado | Modo Visible obrigatório |
-| Go libs | Não especificadas | go-pty explicitado |
+**Pronto para implementação.**
 
 ---
 
-**Versão:** 2.0
-**Data:** 2026-05-01
-**Status:** Para revisão
+## Próximos Passos
+
+1. **Revisão:** Usuário analisa o plano
+2. **Aprovação:** Usuário aprova ou solicita mudanças
+3. **Sprint 1:** Implementar CASCA Core (Go)
+4. **Iteração:** Feedback contínuo
+
+---
+
+**Versão:** 3.0
+**Última atualização:** 2026-05-01
+**Status:** Pronto para implementação
