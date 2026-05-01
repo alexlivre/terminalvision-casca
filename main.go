@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/alexlivre/terminalvision-casca/internal/adapter"
+	"github.com/alexlivre/terminalvision-casca/internal/adapter/http"
 )
 
 func main() {

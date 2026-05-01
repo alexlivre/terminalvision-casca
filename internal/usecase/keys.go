@@ -3,6 +3,7 @@ package usecase
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // KeyMap maps key names to bytes
@@ -97,6 +98,7 @@ func parseKeyEvent(item interface{}) ([]byte, error) {
 			case "z":
 				return KeyMap["ctrl+z"], nil
 			}
+			return parseStringKeys(strings.ToLower(key)), nil
 		case "alt":
 			// Alt is ESC prefix + key
 			return append([]byte{0x1B}, []byte(key)...), nil

@@ -3,15 +3,14 @@ package infrastructure
 import (
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/alexlivre/terminalvision-casca/internal/domain"
 )
 
-// PTYSession represents a PTY-based terminal session
 type PTYSession struct {
 	id      string
 	pid     int
@@ -25,12 +24,8 @@ type PTYSession struct {
 	closeMu sync.RWMutex
 }
 
-// NewPTYSession creates a new PTY session using creack/pty
 func NewPTYSession(id, command string, args []string, cols, rows int) (*PTYSession, error) {
-	// Start the command
 	cmd := exec.Command(command, args...)
-
-	// Start PTY
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start PTY: %w", err)
@@ -48,12 +43,10 @@ func NewPTYSession(id, command string, args []string, cols, rows int) (*PTYSessi
 	}, nil
 }
 
-// PID returns the process ID
 func (s *PTYSession) PID() int {
 	return s.pid
 }
 
-// ReadOutput reads available output
 func (s *PTYSession) ReadOutput() ([]byte, error) {
 	s.closeMu.RLock()
 	defer s.closeMu.RUnlock()
@@ -63,16 +56,14 @@ func (s *PTYSession) ReadOutput() ([]byte, error) {
 	buf := make([]byte, 4096)
 	s.ptmx.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	n, err := s.ptmx.Read(buf)
-	if err != nil && err.Error() != "read tcp 127.0.0.1:*: use of closed network connection" {
-		if n == 0 && (err == io.EOF || err.Error() == "i/o timeout") {
+	if err != nil && err != io.EOF {
+		if n == 0 {
 			return nil, nil
 		}
-		return buf[:n], nil
 	}
 	return buf[:n], nil
 }
 
-// WriteInput sends input to the terminal
 func (s *PTYSession) WriteInput(data []byte) error {
 	s.closeMu.RLock()
 	defer s.closeMu.RUnlock()
@@ -83,7 +74,6 @@ func (s *PTYSession) WriteInput(data []byte) error {
 	return err
 }
 
-// Resize resizes the terminal
 func (s *PTYSession) Resize(cols, rows int) error {
 	s.closeMu.RLock()
 	defer s.closeMu.RUnlock()
@@ -92,10 +82,10 @@ func (s *PTYSession) Resize(cols, rows int) error {
 	}
 	s.cols = cols
 	s.rows = rows
-	return pty.Setsize(s.ptmx, cols, rows)
+	pty.Setsize(s.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	return nil
 }
 
-// Close closes the session
 func (s *PTYSession) Close() error {
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
@@ -112,28 +102,23 @@ func (s *PTYSession) Close() error {
 	return nil
 }
 
-// PTYManager manages PTY sessions
 type PTYManager struct {
 	sessions map[string]*PTYSession
 	mu       sync.RWMutex
 }
 
-// NewPTYManager creates a new PTY manager
 func NewPTYManager() *PTYManager {
 	return &PTYManager{
 		sessions: make(map[string]*PTYSession),
 	}
 }
 
-// Spawn creates a new PTY session
 func (m *PTYManager) Spawn(id, command string, args []string, cols, rows int) (*PTYSession, error) {
 	session, err := NewPTYSession(id, command, args, cols, rows)
 	if err != nil {
 		return nil, err
 	}
-	// Set initial size
-	pty.Setsize(session.ptmx, cols, rows)
-	// Set terminal type
+	pty.Setsize(session.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	session.WriteInput([]byte("set TERM=xterm-256color\n"))
 
 	m.mu.Lock()
@@ -142,7 +127,6 @@ func (m *PTYManager) Spawn(id, command string, args []string, cols, rows int) (*
 	return session, nil
 }
 
-// Get retrieves a session by ID
 func (m *PTYManager) Get(id string) (*PTYSession, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -150,7 +134,6 @@ func (m *PTYManager) Get(id string) (*PTYSession, bool) {
 	return session, ok
 }
 
-// Remove removes a session by ID
 func (m *PTYManager) Remove(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -161,7 +144,6 @@ func (m *PTYManager) Remove(id string) error {
 	return nil
 }
 
-// HasOutput checks if session produces output within timeout
 func (m *PTYManager) HasOutput(session *PTYSession, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -174,7 +156,6 @@ func (m *PTYManager) HasOutput(session *PTYSession, timeout time.Duration) bool 
 	return false
 }
 
-// IsRunning checks if a session is still running
 func (m *PTYManager) IsRunning(id string) bool {
 	m.mu.RLock()
 	session, ok := m.sessions[id]
@@ -185,7 +166,6 @@ func (m *PTYManager) IsRunning(id string) bool {
 	if session.cmd == nil || session.cmd.Process == nil {
 		return false
 	}
-	// Try to signal 0 - doesn't kill, just checks if process exists
 	err := session.cmd.Process.Signal(nil)
 	return err == nil
 }
